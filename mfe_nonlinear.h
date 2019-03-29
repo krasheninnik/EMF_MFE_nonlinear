@@ -19,7 +19,7 @@ class NonlinearTask {
 	using LocalMatrix = std::vector<std::vector<double>>;
 	using func = std::function<double(const double&)>;
 	using func2 = std::function<double(const double&, const double&)>;
-	using func3d1fun = std::function<double(const double&, const double&, const double&, const func&)>;
+	using func3d1fun = std::function<double(const double&, const double&, const double&, const func2&)>;
 
 public:
 	//NonlinearTask();
@@ -33,7 +33,7 @@ public:
 	void linearizeLocalMatrixsAndRighPart();
 	void methodOfNewton();
 
-	void saveResult();
+	void saveResult(const int timeIter, const double t);
 	void resetGlobalMatrix();
 	void resetGlobalF();
 
@@ -52,6 +52,7 @@ private:
 private:
 	// result output stream
 	std::ofstream fout;
+	std::vector<double> qExact;  // for calculate norm of error
 
 	// time grid:
 	std::vector<double> times;
@@ -79,10 +80,11 @@ private:
 
 	// parameters of equation in different subareas:
 	int amountSubareas;
+	func2 uExact;
 	func3d1fun fFunc;
 	func2 fStart;
 	std::vector<double> lambda;
-	std::vector<func> sigma;
+	std::vector<func2> sigma;
 
 	double leftU;		// first boundary conditions
 	double rightU;

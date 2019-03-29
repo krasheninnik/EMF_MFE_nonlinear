@@ -6,19 +6,27 @@
 
 void NonlinearTask::setParams() {
 	lambda = std::vector<double>(amountSubareas);
-	sigma = std::vector<func>(amountSubareas);
+	sigma = std::vector<func2>(amountSubareas);
 
 	u = std::vector<double>(nodes.size());
 
-	lambda[0] = 1;
-	sigma[0]  = [](const double& u) {return u; };
-	fFunc =		[](const double& x, const double& t, const double& u, const func& sigma) {return -2 * t + sigma(u) * x*x; };
-	fStart =	[](const double& x, const double& t) {return x * x * t; };
+	/*
+		lambda[0] = 1;
+		sigma[0]  = [](const double& u) {return u; };
+		fFunc =		[](const double& x, const double& t, const double& u, const func& sigma) {return -2 * t + sigma(u) * x*x; };
+		fStart =	[](const double& x, const double& t) {return x * x * t; };
+		*/
 
+	lambda[0] = 1;
+	uExact = [](const double& x, const double& t) {return 5 * x * t; };
+	sigma[0] = [](const double& u, const double& x) {return 1+ x + u; };
+
+	fFunc = [](const double& x, const double& t, const double& u, const func2& sigma) {return sigma(u,x) * 5 *x; };
+	//fStart = [](const double& x, const double& t) {return x * t; };
 
 	// set boundary conditions:
-	leftU = 0;
-	rightU = 36;
+	leftU = uExact(nodes[0],  0);
+	rightU = uExact(nodes[nodes.size() - 1], 0);
 }
 
 void NonlinearTask::init() {
@@ -57,35 +65,47 @@ void NonlinearTask::init() {
 	int numOfAreas;
 	fin >> numOfAreas;
 
-	double xStart, numOfNodes;
-	fin >> xStart >> numOfNodes >> step >> coef;
+	double xStart, numOfElems;
+	fin >> xStart >> numOfElems >> step >> coef;
 
-	double x = xStart;
-	for (int i = 0; i < numOfNodes; i++) {
-		nodes.push_back(x);
-		x += step;
+	const int stepsOnFiniteElem = 2;
+
+	// there: length of 1 finite elem == 2 step
+	double x = xStart;	
+	nodes.push_back(x);		// add x0 in nodes
+	for (int i = 0; i < numOfElems; i++) {
+		for (int j = 0; j < stepsOnFiniteElem; j++) {	// add another nodes
+			x += step;
+			nodes.push_back(x);
+		}
+
 		step = step * coef;
 	}
 
-	// add for another zones
-
+	// fill elems array:
 	int k = 0;
 	for (; k < nodes.size() - 2; k+=2) {
 		elems.push_back(FiniteElem{ k, k + 1, k + 2});
 	}
-	
+
 	assert(k == nodes.size() - 1);
 
-	/////////////////////////////////////////////////////////////////////////////////////
-	/////////////////////////////////////////////////////////////////////////////////////
-	// read subareas from file:
-	/////////////////////////////////////////////////////////////////////////////////////
-	for (int i = 0; i < elems.size(); i++) subareas.push_back(0);
-	amountSubareas = 1;
+	// fill subareas:
+	int  numOfFiniteElems = 0;
+	int sum = 0;
 
-	// read params of equals in subareas:
+	fin >> amountSubareas;
+	for (int i = 0; i < amountSubareas; i++) {
+		fin >> numOfFiniteElems;
+		sum += numOfFiniteElems;
+		for(int j = 0; j < numOfFiniteElems; j++) subareas.push_back(0);
+	}	
+	
+	assert(sum == elems.size());
+
+	// init vector of params of equals in subareas:
 	lambda = std::vector<double>(amountSubareas);
-	sigma = std::vector<func>(amountSubareas);
+	sigma = std::vector<func2>(amountSubareas);
 
 	fin.close();
 #pragma endregion
@@ -109,6 +129,8 @@ void NonlinearTask::init() {
 	q = std::vector<double>(nodes.size());
 	qPrev = std::vector<double>(nodes.size());
 	qPrevTime = std::vector<double>(nodes.size());
+	qExact = std::vector<double>(nodes.size());;
+
 
 	// there should be vector<vvector<doub>> results -> for save q on each step!
 	temp = std::vector<double>(nodes.size());
@@ -152,16 +174,17 @@ void NonlinearTask::calculateGlobalMatrixAndRightPart(const double t, const doub
 
 void NonlinearTask::solve() {
 	// need input things:
-	epsDiscrep = 1e-10;
+	epsDiscrep = 1e-15;
+
 	double t = 0;
 	// calculate u0:
 	for (uint32_t i = 0; i < u.size(); i++) {
-		q[i] = qPrevTime[i] = fStart(nodes[i], times[0]);
+		q[i] = qPrevTime[i] = uExact(nodes[i], times[0]);
 	}
 
 	// approximation by time:
 	for (uint32_t i = 1; i < times.size(); i++) {
-		double dt = times[i] - times[i - 1];
+		const double dt = times[i] - times[i - 1];
 		const double t = times[i];
 		calculateGlobalMatrixAndRightPart(t, dt);
 
@@ -179,7 +202,7 @@ void NonlinearTask::solve() {
 			
 			if (SimpleIterationDiscrepOut()) {
 				calculating = false;
-				saveResult();
+				saveResult(i, t);
 			}
 			else {
 				// prepare next iteration:
@@ -187,7 +210,6 @@ void NonlinearTask::solve() {
 			}
 		}
 		
-
 		// prepare next iteration:
 		//std::swap(q, qPrevTime);
 		qPrevTime = q;  
@@ -202,9 +224,9 @@ void NonlinearTask::calculateLocalMatrixOfMass(uint32_t elemNum){
 
 						  // sigma_k(u)
 	const auto& sigmaLocal = sigma[subareas[elemNum]];
-	const double coef0 = k * sigmaLocal(q[elem.left]);	// sigma(u[elem.first)]; * multiply to step. [nodes[elem.right] - nodes[elem.left]);
-	const double coef1 = k * sigmaLocal(q[elem.mid]);		// sigma(u[elem.second)]'
-	const double coef2 = k * sigmaLocal(q[elem.right]);
+	const double coef0 = k * sigmaLocal(q[elem.left], nodes[elem.left]);		// sigma(u[elem.first)]; * multiply to step. [nodes[elem.right] - nodes[elem.left]);
+	const double coef1 = k * sigmaLocal(q[elem.mid], nodes[elem.mid]);		// sigma(u[elem.second)]'
+	const double coef2 = k * sigmaLocal(q[elem.right], nodes[elem.right]);
 
 	massLocalMatrix[0][0] = coef0 * 0.09285714285714286 + coef1 * 0.04761904761904761 + coef2 * -7.1428571428571415e-3;
 	massLocalMatrix[0][1] = coef0 * 0.04761904761904761 + coef1 * 0.0380952380952381 + coef2 * -0.01904761904761905;
@@ -278,11 +300,11 @@ void NonlinearTask::addLocalRigtPartToGlobal(uint32_t num) {
 void NonlinearTask::setFirstBoundaryConditions(const double t) {
 	// set first bounday conditions in left side:
 	globalMatrix.setFirstBoundaryConditionsLeft();
-	f[0] = fStart(nodes[0], t);
+	f[0] = uExact(nodes[0], t);
 
 	// set first bounday conditions in right side:
 	globalMatrix.setFirstBoundaryConditionsRight();
-	f[f.size() - 1] = fStart(nodes[nodes.size() - 1], t);
+	f[f.size() - 1] = uExact(nodes[nodes.size() - 1], t);
 }
 
 void vectorSubtraction(std::vector<double>& result, const std::vector<double>& a){
@@ -319,7 +341,16 @@ void NonlinearTask::resetGlobalF() {
 	for (int i = 0; i < f.size(); i++) f[i] = 0;
 }
 
-void NonlinearTask::saveResult() {
-	for (const auto& res : q) fout << res << " ";
+void NonlinearTask::saveResult(const int timeIter, const double t) {
+	double sum = 0;
+	for (int i = 0; i < qExact.size(); i++) {
+		qExact[i] = uExact(nodes[i], t);
+		sum += (qExact[i] - q[i])*(qExact[i] - q[i]);
+	}
+	sum = sqrt(sum);
+
+	fout << "TimeIteration: " << timeIter << "\tTime: " << t << "\tNormOfError: " << sum << std::endl;
+	for (const auto& resExact : qExact) fout << resExact << " ";  fout << std::endl;
+	for (const auto& res : q) fout << res << " "; fout << std::endl;
 	fout << std::endl;
 }

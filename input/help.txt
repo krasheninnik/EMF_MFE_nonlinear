@@ -1,0 +1,10 @@
+space grid:
+amountUnevenness
+x0 amountNodes firstStep unevennesCoef
+amountSubareas
+amountFiniteElemsToSubarea1
+amountFiniteElemsToSubarea2
+...
+
+time grid:
+t0 amountSteps firstStep unevennesCoef
