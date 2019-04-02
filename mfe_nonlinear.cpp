@@ -44,7 +44,7 @@ void NonlinearTask::init() {
 #pragma endregion
 
 #pragma region InitTimeGrid
-	{
+{
 	times = std::vector<double>();
 
 	std::fstream fin(R"(input/grid_time.txt)");
@@ -70,12 +70,11 @@ void NonlinearTask::init() {
 	}
 
 	fin.close();
-	}
+}
 #pragma endregion
 
-	// need change Init Grid: 1 step1 2 step1 3 
 #pragma region InitSpaceGrid
-	{
+{
 	nodes = std::vector<double>();
 	elems = std::vector<FiniteElem>();
 	subareas = std::vector<int>();
@@ -90,7 +89,6 @@ void NonlinearTask::init() {
 	double xStart, numOfElems, step, coef;
 	fin >> xStart >> numOfElems >> step >> coef;
 
-	//const int stepsOnFiniteElem = 2;
 	int k = pow(2, numSpaceGridDividion - 1);
 
 	// calculate grid parameters for unevenness:
@@ -101,7 +99,6 @@ void NonlinearTask::init() {
 	for (int i = 0; i < k; i++) stepsCoef += pow(coef, i);
 	step /= stepsCoef;
 
-	// there: length of 1 finite elem == 2 step
 	double x = xStart;	
 	nodes.push_back(x);		// add x0 in nodes
 	for (int i = 0; i < numOfElems; i++) {
@@ -139,7 +136,7 @@ void NonlinearTask::init() {
 	sigma = std::vector<func2>(amountSubareas);
 
 	fin.close();
-	}
+}
 #pragma endregion
 
 #pragma region MatrixInit
@@ -215,7 +212,7 @@ void NonlinearTask::solve() {
 		calculateGlobalMatrixAndRightPart(t, dt);
 
 		// solve nonlinear system of equations: A(qi)qi = b(qi)
-		// there mathod of simple itertations: A(qi-1)qi = b(qi-1)
+		// there method of simple itertations: A(qi-1)qi = b(qi-1)
 
 		bool calculating = true;
 		while (calculating) {
@@ -229,8 +226,6 @@ void NonlinearTask::solve() {
 			if (SimpleIterationDiscrepOut()) {
 				calculating = false;
 				saveResult(i, t);
-
-				std::cout << "+" << std::endl;
 			}
 			else {
 				// prepare next iteration:
