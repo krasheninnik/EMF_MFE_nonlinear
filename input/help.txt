@@ -1,6 +1,7 @@
 space grid:
+amountGridDividions
 amountUnevenness
-x0 amountNodes firstStep unevennesCoef
+x0 amountFiniteElems firstStep unevennesCoef
 amountSubareas
 amountFiniteElemsToSubarea1
 amountFiniteElemsToSubarea2

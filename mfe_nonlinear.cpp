@@ -17,11 +17,19 @@ void NonlinearTask::setParams() {
 		fStart =	[](const double& x, const double& t) {return x * x * t; };
 		*/
 
+	/* u = 5*x^4
 	lambda[0] = 1;
-	uExact = [](const double& x, const double& t) {return 5 * x * t; };
-	sigma[0] = [](const double& u, const double& x) {return 1+ x + u; };
+	uExact = [](const double& x, const double& t) {return 5*x*x*x*x; };
+	sigma[0] = [](const double& u, const double& x) {return 2; };
+	fFunc = [](const double& x, const double& t, const double& u, const func2& sigma) {return -60*x*x; };
+	*/
 
-	fFunc = [](const double& x, const double& t, const double& u, const func2& sigma) {return sigma(u,x) * 5 *x; };
+	lambda[0] = 1;
+	uExact = [](const double& x, const double& t) {return t*t*t; };
+	sigma[0] = [](const double& u, const double& x) {return 2; };
+	fFunc = [](const double& x, const double& t, const double& u, const func2& sigma) {return 3*t*t*sigma(u,x); };
+
+	//fFunc = [](const double& x, const double& t, const double& u, const func2& sigma) {return sigma(u,x) * 5 *x; };
 	//fStart = [](const double& x, const double& t) {return x * t; };
 
 	// set boundary conditions:
@@ -36,13 +44,24 @@ void NonlinearTask::init() {
 #pragma endregion
 
 #pragma region InitTimeGrid
+	{
 	times = std::vector<double>();
 
 	std::fstream fin(R"(input/grid_time.txt)");
 	double t0, step, coef;
-	int amount;
+	int amount, numTimeGridDividion;
 
-	fin >> t0 >> amount >> step >> coef;
+	fin >> numTimeGridDividion >>  t0 >> amount >> step >> coef;
+
+	int k = pow(2, numTimeGridDividion - 1);
+
+	// calculate grid parameters for unevenness:
+	amount *= k;
+	coef = pow(coef, 1.0 / k);
+	// calculate first step
+	double stepsCoef = 0;
+	for (int i = 0; i < k; i++) stepsCoef += pow(coef, i);	
+	step /= stepsCoef;
 
 	for (int i = 0; i < amount; i++) {
 		times.push_back(t0);
@@ -50,45 +69,56 @@ void NonlinearTask::init() {
 		step *= coef;
 	}
 
-
 	fin.close();
+	}
 #pragma endregion
 
 	// need change Init Grid: 1 step1 2 step1 3 
 #pragma region InitSpaceGrid
+	{
 	nodes = std::vector<double>();
 	elems = std::vector<FiniteElem>();
 	subareas = std::vector<int>();
 
-	fin.open(R"(input/grid_space.txt)");
+	std::fstream fin(R"(input/grid_space.txt)");
 
-	int numOfAreas;
-	fin >> numOfAreas;
+	int numSpaceGridDividion = 1;
+	int numOfAreas = 1;
 
-	double xStart, numOfElems;
+	fin >> numSpaceGridDividion >> numOfAreas;
+
+	double xStart, numOfElems, step, coef;
 	fin >> xStart >> numOfElems >> step >> coef;
 
-	const int stepsOnFiniteElem = 2;
+	//const int stepsOnFiniteElem = 2;
+	int k = pow(2, numSpaceGridDividion - 1);
+
+	// calculate grid parameters for unevenness:
+	numOfElems *= k;
+	coef = pow(coef, 1.0 / k);
+	// calculate first step
+	double stepsCoef = 0;
+	for (int i = 0; i < k; i++) stepsCoef += pow(coef, i);
+	step /= stepsCoef;
 
 	// there: length of 1 finite elem == 2 step
 	double x = xStart;	
 	nodes.push_back(x);		// add x0 in nodes
 	for (int i = 0; i < numOfElems; i++) {
-		for (int j = 0; j < stepsOnFiniteElem; j++) {	// add another nodes
-			x += step;
-			nodes.push_back(x);
-		}
+		nodes.push_back(x + step / 2);		// add middle node on finite elem.
+		x += step;
+		nodes.push_back(x);
 
-		step = step * coef;
+		step *= coef;					// change step
 	}
 
 	// fill elems array:
-	int k = 0;
-	for (; k < nodes.size() - 2; k+=2) {
-		elems.push_back(FiniteElem{ k, k + 1, k + 2});
+	int j = 0;
+	for (; j < nodes.size() - 2; j+=2) {
+		elems.push_back(FiniteElem{ j, j + 1, j + 2});
 	}
 
-	assert(k == nodes.size() - 1);
+	assert(j == nodes.size() - 1);
 
 	// fill subareas:
 	int  numOfFiniteElems = 0;
@@ -97,6 +127,7 @@ void NonlinearTask::init() {
 	fin >> amountSubareas;
 	for (int i = 0; i < amountSubareas; i++) {
 		fin >> numOfFiniteElems;
+		numOfFiniteElems *= k; // consideration of grid dividion
 		sum += numOfFiniteElems;
 		for(int j = 0; j < numOfFiniteElems; j++) subareas.push_back(0);
 	}	
@@ -108,20 +139,15 @@ void NonlinearTask::init() {
 	sigma = std::vector<func2>(amountSubareas);
 
 	fin.close();
+	}
 #pragma endregion
 
 #pragma region MatrixInit
 	globalMatrix = Matrix();
 	
 	const int matrixDim = 3 + (elems.size() - 1) * 2;
-	globalMatrix.init(matrixDim); // change
-/*			// to debug 
-	globalMatrix.LUdecompose();
-	f = std::vector<double>{ 2,4,6,8,10,12 };
-	qPrev = std::vector < double>(6);
-	q = std::vector < double>(6);
-	globalMatrix.solveSystem(f, q, qPrev);
-*/
+	globalMatrix.init(matrixDim); 
+
 #pragma endregion
 
 #pragma region MemoryAllocation
@@ -171,7 +197,7 @@ void NonlinearTask::calculateGlobalMatrixAndRightPart(const double t, const doub
 	// set boundary conditions
 	setFirstBoundaryConditions(t);
 }
-
+#include <iostream>
 void NonlinearTask::solve() {
 	// need input things:
 	epsDiscrep = 1e-15;
@@ -203,6 +229,8 @@ void NonlinearTask::solve() {
 			if (SimpleIterationDiscrepOut()) {
 				calculating = false;
 				saveResult(i, t);
+
+				std::cout << "+" << std::endl;
 			}
 			else {
 				// prepare next iteration:
